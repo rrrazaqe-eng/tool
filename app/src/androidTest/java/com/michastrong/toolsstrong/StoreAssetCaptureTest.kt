@@ -2,10 +2,13 @@ package com.michastrong.toolsstrong
 
 import android.Manifest
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Build
 import android.os.SystemClock
+import android.os.Environment
+import android.provider.MediaStore
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
@@ -81,6 +84,7 @@ class StoreAssetCaptureTest {
         assertTrue(File(directory, "02-video-compression.png").isFile)
         assertTrue(File(directory, "03-audio-cover.png").isFile)
         assertTrue(File(directory, "icon-512.png").isFile)
+        exportForHost()
     }
 
     private fun screenshot(name: String, description: String) {
@@ -115,6 +119,30 @@ class StoreAssetCaptureTest {
             put("height", bitmap.height)
             put("sha256", digest)
         })
+    }
+
+    private fun exportForHost() {
+        // connectedAndroidTest uninstalls the debug package before returning.
+        // Shared Downloads survive that uninstall, so the host can retrieve them.
+        for (name in listOf("01-home.png", "02-video-compression.png", "03-audio-cover.png", "icon-512.png", "capture-manifest.json")) {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.MIME_TYPE, if (name.endsWith(".png")) "image/png" else "application/json")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/ToolsStrongStoreAssets/")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val resolver = context.contentResolver
+            val uri = requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values))
+            try {
+                requireNotNull(resolver.openOutputStream(uri)).use { output ->
+                    File(directory, name).inputStream().use { input -> input.copyTo(output) }
+                }
+                resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            } catch (error: Throwable) {
+                resolver.delete(uri, null, null)
+                throw error
+            }
+        }
     }
 
     private fun waitForLabel(label: String) {

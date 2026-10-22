@@ -93,7 +93,8 @@ jobs:
           script: |
             ./gradlew --no-daemon --stacktrace -PtoolsStrongAbis=x86_64 :app:connectedDebugAndroidTest
             mkdir -p out/rustore
-            for name in 01-home.png 02-video-compression.png 03-audio-cover.png icon-512.png capture-manifest.json; do adb exec-out run-as com.michastrong.toolsstrong.debug cat "files/store-assets/$name" > "out/rustore/$name"; test -s "out/rustore/$name" || exit 1; done
+            for name in 01-home.png 02-video-compression.png 03-audio-cover.png icon-512.png capture-manifest.json; do adb pull "/sdcard/Download/ToolsStrongStoreAssets/$name" "out/rustore/$name" || exit 1; done
+            python3 scripts/verify_store_assets.py out/rustore
 
       - name: Upload installable ARM64 APK
         uses: actions/upload-artifact@v4
