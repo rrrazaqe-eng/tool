@@ -148,8 +148,11 @@ class StoreAssetCaptureTest {
     }
 
     private fun nodesForLabel(label: String): List<AccessibilityNodeInfo> =
-        automation.rootInActiveWindow?.findAccessibilityNodeInfosByText(label).orEmpty().filter { node ->
-            node.isVisibleToUser && node.text?.toString()?.lines()?.any { it.trim() == label } == true
+        // Compose exposes virtual nodes; Android 16's provider text search can return
+        // an empty list even when the same label is present in the visible tree.
+        allNodes().filter { node ->
+            node.isVisibleToUser && listOf(node.text, node.hintText, node.contentDescription)
+                .filterNotNull().any { text -> text.toString().lines().any { it.trim() == label } }
         }
 
     private fun allNodes(): List<AccessibilityNodeInfo> {
