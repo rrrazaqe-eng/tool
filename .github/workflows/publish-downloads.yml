@@ -1,0 +1,49 @@
+name: Publish verified RuStore download
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_blobs:
+        description: Comma-separated Git blob IDs for the already signed APK
+        required: true
+        type: string
+      apk_sha256:
+        description: SHA-256 of the already verified release APK
+        required: true
+        type: string
+      materials_blob:
+        description: Git blob ID of the public store material ZIP (optional)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-rustore-download
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      APK_BLOBS: ${{ inputs.apk_blobs }}
+      APK_SHA256: ${{ inputs.apk_sha256 }}
+      MATERIALS_BLOB: ${{ inputs.materials_blob }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reassemble and verify the signed public APK
+        run: python3 scripts/prepare_download.py
+      - name: Verify ARM64 libraries and 16 KB alignment
+        run: python3 scripts/verify_apk.py out/Tools-Strong-1.0.0-release.apk
+      - name: Publish files to GitHub Releases
+        run: |
+          if ! gh release view v1.0.0-rustore --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create v1.0.0-rustore --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'Tools Strong 1.0.0 — APK для RuStore' --notes 'Подписанный ARM64 APK для загрузки в RuStore. Android 10+, целевой API 36. Файл SHA-256 приложен. Публикация в RuStore выполняется отдельно.'
+          fi
+          gh release upload v1.0.0-rustore --repo "$GITHUB_REPOSITORY" --clobber out/Tools-Strong-1.0.0-release.apk out/Tools-Strong-1.0.0-release.apk.sha256
+          if [ -f out/Tools-Strong-RuStore-materials.zip ]; then
+            gh release upload v1.0.0-rustore --repo "$GITHUB_REPOSITORY" --clobber out/Tools-Strong-RuStore-materials.zip
+          fi
