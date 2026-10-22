@@ -7,7 +7,6 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.SystemClock
-import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.resume
@@ -137,7 +136,8 @@ class ProcessingService : Service() {
         publish(initial)
         // mediaProcessing was introduced in API 35; earlier devices use dataSync.
         try {
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, makeNotification(initial),
+            // minSdk 29 supports the platform overload; ServiceCompat masks out mediaProcessing.
+            startForeground(NOTIFICATION_ID, makeNotification(initial),
                 if (Build.VERSION.SDK_INT >= 35) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
                 else ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } catch (error: Exception) {
