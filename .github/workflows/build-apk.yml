@@ -1,0 +1,103 @@
+name: Build Tools Strong APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check public source files
+        run: python3 scripts/check_public_source.py
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 16 SDK
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Compile, unit test, lint and assemble ARM64 debug APK
+        run: ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+
+      - name: Install host FFmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+
+      - name: Test media commands with FFmpeg and ffprobe
+        run: python3 scripts/media_smoke_test.py app/build/media-cases.json
+
+      - name: Verify and stage installable APK
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 app/build/outputs/apk/debug/app-debug.apk
+          python3 scripts/verify_apk.py app/build/outputs/apk/debug/app-debug.apk
+          mkdir -p out
+          cp app/build/outputs/apk/debug/app-debug.apk out/Tools-Strong-1.0.0-debug.apk
+          cd out
+          sha256sum Tools-Strong-1.0.0-debug.apk > Tools-Strong-1.0.0-debug.apk.sha256
+
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Test Android 16 images, PDF, history, sharing, cancellation and native codecs
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          cores: 2
+          ram-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: ./gradlew --no-daemon --stacktrace -PtoolsStrongAbis=x86_64 :app:connectedDebugAndroidTest
+
+      - name: Upload installable ARM64 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tools-Strong-APK
+          path: out/Tools-Strong-1.0.0-debug.apk*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tools-Strong-validation
+          path: |
+            app/build/reports/
+            app/build/outputs/androidTest-results/
+            app/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
