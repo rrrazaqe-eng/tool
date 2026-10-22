@@ -95,7 +95,10 @@ class ProcessingService : Service() {
         when (intent?.action) {
             ACTION_CANCEL -> cancelProcessing("Обработка отменена")
             ACTION_START -> if (!isRunning && !terminal.get() && work?.isCompleted != false) runJob(intent)
-                else android.widget.Toast.makeText(this, "Предыдущая операция ещё завершается", android.widget.Toast.LENGTH_SHORT).show()
+                else {
+                    android.widget.Toast.makeText(this, "Предыдущая операция ещё завершается", android.widget.Toast.LENGTH_SHORT).show()
+                    if (terminal.get()) stopSelf(startId)
+                }
         }
         return START_NOT_STICKY
     }
@@ -212,9 +215,8 @@ class ProcessingService : Service() {
             } finally {
                 ffmpegSession = null
                 cleanup(localInput, localSecond, localOutput)
-                isRunning = false
             }
-        }
+        }.also { job -> job.invokeOnCompletion { isRunning = false } }
     }
 
     private suspend fun execute(args: List<String>, durationMs: Long): FFmpegSession = suspendCoroutine { continuation ->
