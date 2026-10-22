@@ -171,7 +171,7 @@ class MediaCommandsTest {
         add("rotate-90", options(JobType.ROTATE), 1080, 1920)
         add("crop-square", options(JobType.CROP), 1080, 1080)
         add("resize-720p", options(JobType.RESIZE), 1280, 720)
-        File("build/media-cases.json").apply { parentFile.mkdirs(); writeText("[\n${cases.joinToString(",\n")}\n]\n") }
+        File("build/media-cases.json").apply { parentFile?.mkdirs(); writeText("[\n${cases.joinToString(",\n")}\n]\n") }
         assertTrue(cases.size >= 40)
     }
 

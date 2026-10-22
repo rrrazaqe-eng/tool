@@ -321,13 +321,14 @@ object MediaUtils {
         try {
             val decoded = decodeImage(context, input, 1600)
             bitmap = decoded
-            PdfDocument().use { doc ->
+            val doc = PdfDocument()
+            try {
                 val page = doc.startPage(PdfDocument.PageInfo.Builder(decoded.width, decoded.height, 1).create())
                 page.canvas.drawColor(Color.WHITE)
                 page.canvas.drawBitmap(decoded, null, Rect(0, 0, decoded.width, decoded.height), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
                 doc.finishPage(page)
                 context.contentResolver.openOutputStream(output.uri, "w")!!.use { doc.writeTo(it) }
-            }
+            } finally { doc.close() }
             finalizePending(context, output)
             return output
         } catch (t: Throwable) {
