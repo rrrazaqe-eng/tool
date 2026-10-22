@@ -164,6 +164,51 @@ class AndroidMediaTest {
     }
 
     @Test(timeout = 30_000)
+    fun foregroundAudioConversionPublishesSavedResultAndHistory() {
+        val source = wav()
+        grantNotifications()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                ProcessingService.start(activity, Intent().apply {
+                    putExtra(ProcessingService.EXTRA_TYPE, JobType.AUDIO_CONVERT.name)
+                    putExtra(ProcessingService.EXTRA_INPUT, Uri.fromFile(source).toString())
+                    putExtra(ProcessingService.EXTRA_NAME, source.name)
+                    putExtra(ProcessingService.EXTRA_SIZE, source.length())
+                    putExtra(ProcessingService.EXTRA_DURATION, 1000L)
+                    putExtra(ProcessingService.EXTRA_AUDIO_FORMAT, "M4A")
+                    putExtra(ProcessingService.EXTRA_AUDIO_BITRATE, 128)
+                })
+            }
+            waitUntil("saved foreground audio result and finished cleanup") {
+                JobStore.load(context).isResult && !ProcessingService.isRunning
+            }
+            val state = JobStore.load(context)
+            val result = Uri.parse(requireNotNull(state.resultUri))
+            outputs += result
+            assertFalse(state.running)
+            assertFalse(state.cancelled)
+            assertEquals(100, state.progress)
+            assertEquals("audio/mp4", state.resultMime)
+            assertEquals("audio/mp4", context.contentResolver.getType(result))
+            assertTrue(state.resultSize > 100)
+            assertEquals(state.resultSize, MediaUtils.fileSize(context, result))
+            assertEquals(Uri.fromFile(source).toString(), state.originalUri)
+            assertTrue(source.exists())
+            assertEquals(88_244L, source.length())
+            assertTrue("Saved M4A duration changed", abs(MediaUtils.durationMs(context, result) - 1000) < 300)
+            val history = HistoryStore.load(context)
+            assertEquals(1, history.size)
+            assertEquals(result.toString(), history.single().uri)
+            assertEquals(state.resultName, history.single().name)
+            assertEquals(state.resultSize, history.single().size)
+            val notifications = context.getSystemService(NotificationManager::class.java)
+            waitUntil("completed audio foreground notification removal") {
+                notifications.activeNotifications.none { it.id == 4107 }
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
     fun cancellingForegroundPreparationLeavesSourceAndNoResultOrHistory() {
         val source = temp("mp4")
         // A sparse fixture keeps preparation busy without allocating a large bitmap/video.
