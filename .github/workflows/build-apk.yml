@@ -90,7 +90,10 @@ jobs:
           ram-size: 2048M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: ./gradlew --no-daemon --stacktrace -PtoolsStrongAbis=x86_64 :app:connectedDebugAndroidTest
+          script: |
+            ./gradlew --no-daemon --stacktrace -PtoolsStrongAbis=x86_64 :app:connectedDebugAndroidTest
+            mkdir -p out/rustore
+            for name in 01-home.png 02-video-compression.png 03-audio-cover.png icon-512.png capture-manifest.json; do adb exec-out run-as com.michastrong.toolsstrong.debug cat "files/store-assets/$name" > "out/rustore/$name"; test -s "out/rustore/$name" || exit 1; done
 
       - name: Upload installable ARM64 APK
         uses: actions/upload-artifact@v4
@@ -111,3 +114,13 @@ jobs:
             app/build/test-results/
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Upload actual app screenshots and icon for RuStore
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tools-Strong-RuStore-assets
+          path: |
+            out/rustore/
+            distribution/rustore/
+          if-no-files-found: error
+          retention-days: 30
