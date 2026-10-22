@@ -79,6 +79,7 @@ class ProcessingService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val stateLock = Any()
     private var work: Job? = null
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
     @Volatile private var ffmpegSession: FFmpegSession? = null
     private val cancelled = AtomicBoolean(false)
     private val terminal = AtomicBoolean(false)
@@ -146,6 +147,11 @@ class ProcessingService : Service() {
             return
         }
 
+        wakeLock = getSystemService(android.os.PowerManager::class.java)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "ToolsStrong:processing").apply {
+                setReferenceCounted(false)
+                acquire(6 * 60 * 60 * 1000L)
+            }
         work = scope.launch {
             var localInput: File? = null
             var localSecond: File? = null
@@ -216,7 +222,7 @@ class ProcessingService : Service() {
                 ffmpegSession = null
                 cleanup(localInput, localSecond, localOutput)
             }
-        }.also { job -> job.invokeOnCompletion { isRunning = false } }
+        }.also { job -> job.invokeOnCompletion { releaseWakeLock(); isRunning = false } }
     }
 
     private suspend fun execute(args: List<String>, durationMs: Long): FFmpegSession = suspendCoroutine { continuation ->
@@ -347,9 +353,14 @@ class ProcessingService : Service() {
         JobType.AUDIO_CONVERT -> "Конвертация аудио"
     }
 
+    private fun releaseWakeLock() {
+        runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         if (isRunning && !terminal.get()) cancelProcessing("Обработка прервана системой. Запустите её снова")
         scope.cancel()
+        releaseWakeLock()
     }
 }
