@@ -74,7 +74,9 @@ object MediaCommands {
         val height = when (o.resolution) { "1080p" -> 1080; "720p" -> 720; "480p" -> 480; else -> 0 }
         val privacy = listOf("-map_metadata", "-1", "-map_chapters", "-1")
         fun encoded(codec: String = encoder, rate: Int = videoK) = listOf(
+            // NDK async avoids MediaCodec's undefined encoder flush during MP4 header probing.
             "-c:v", codec, "-b:v", "${rate}k", "-pix_fmt", "yuv420p",
+            "-ndk_codec:v", "1", "-ndk_async:v", "1", "-bsf:v", "extract_extradata",
             "-c:a", "aac", "-b:a", "${audioK}k", "-movflags", "+faststart",
         ) + if (codec == "hevc_mediacodec") listOf("-tag:v", "hvc1") else emptyList()
         fun spec(suffix: String, ext: String = "mp4", mime: String = "video/mp4", kind: MediaUtils.OutputKind = MediaUtils.OutputKind.VIDEO, command: (String) -> List<String>) =
@@ -123,6 +125,7 @@ object MediaCommands {
             }
             JobType.AUDIO_TO_VIDEO -> {
                 requireNotNull(o.second) { "Не выбрана обложка" }
+                require(o.durationMs > 0) { "Не удалось определить длительность аудио. Выберите MP3, M4A или WAV" }
                 require(o.hasAudio) { "В выбранном файле нет аудиодорожки" }
                 require(o.width in 2..1920 && o.height in 2..1920 && o.width % 2 == 0 && o.height % 2 == 0)
                 spec("cover") { out ->
@@ -131,7 +134,7 @@ object MediaCommands {
                         "[0:v][sw]overlay=0:(H-h)/2:shortest=1,format=yuv420p[v]"
                     listOf("-y", "-loop", "1", "-framerate", "30", "-i", o.second, "-i", o.input) +
                         (if (o.wave) listOf("-filter_complex", graph, "-map", "[v]") else listOf("-map", "0:v:0")) +
-                        listOf("-map", "1:a:0") + privacy + encoded("h264_mediacodec", 2500) + listOf("-shortest", out)
+                        listOf("-map", "1:a:0") + privacy + encoded("h264_mediacodec", 2500) + listOf("-r", "30", "-g", "30", "-bf", "0", "-t", seconds(duration), out)
                 }
             }
             JobType.ROTATE -> video("rotated", when (o.rotate) { 180 -> "transpose=2,transpose=2"; 270 -> "transpose=2"; else -> "transpose=1" }, 4500)

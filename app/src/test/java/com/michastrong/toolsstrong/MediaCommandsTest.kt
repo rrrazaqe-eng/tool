@@ -85,6 +85,24 @@ class MediaCommandsTest {
         assertEquals("h264_mediacodec", MediaCommands.build(options()).args("out.mp4").value("-c:v"))
     }
 
+    @Test fun allVideoOutputsUseAsynchronousNdkAndExtractCodecHeaders() {
+        val videoTypes = listOf(JobType.QUICK, JobType.COMPRESS, JobType.TRIM_KEEP, JobType.TRIM_REMOVE,
+            JobType.TRIM_COMPRESS_KEEP, JobType.TRIM_COMPRESS_REMOVE, JobType.AUDIO_TO_VIDEO,
+            JobType.ROTATE, JobType.CROP, JobType.RESIZE)
+        for (type in videoTypes) {
+            for (codec in listOf("H.264", "H.265")) {
+                for (wave in listOf(false, true)) {
+                    val args = MediaCommands.build(options(type).copy(codec = codec, second = "fixture:cover-16x9",
+                        startMs = 1_000, endMs = 3_000, wave = wave)).args("out.mp4")
+                    assertTrue(args.value("-c:v").endsWith("_mediacodec"))
+                    assertEquals("1", args.value("-ndk_codec:v"))
+                    assertEquals("1", args.value("-ndk_async:v"))
+                    assertEquals("extract_extradata", args.value("-bsf:v"))
+                }
+            }
+        }
+    }
+
     @Test fun audioFormatChoosesCorrectCodecAndNeverMapsVideo() {
         for ((format, expected) in listOf("MP3" to "libmp3lame", "M4A" to "aac", "WAV" to "pcm_s16le")) {
             for (type in listOf(JobType.VIDEO_TO_AUDIO, JobType.AUDIO_CONVERT)) {
@@ -93,17 +111,31 @@ class MediaCommandsTest {
                 assertEquals(expected, args.value("-c:a"))
                 assertEquals("0:a:0", args.value("-map"))
                 assertTrue(args.contains("-vn"))
+                assertFalse(args.contains("-ndk_codec:v"))
+                assertFalse(args.contains("-ndk_async:v"))
+                assertFalse(args.contains("-bsf:v"))
             }
         }
         assertThrows(IllegalArgumentException::class.java) { MediaCommands.build(options(JobType.VIDEO_TO_AUDIO).copy(hasAudio = false)) }
     }
 
-    @Test fun coverRequiresAnImageAndKeepsWaveAwayFromTitleArea() {
+    @Test fun coverRequiresAnImageAndFiniteAudioDurationBeforeFeedingHardwareEncoder() {
         assertThrows(IllegalArgumentException::class.java) { MediaCommands.build(options(JobType.AUDIO_TO_VIDEO)) }
-        val args = MediaCommands.build(options(JobType.AUDIO_TO_VIDEO).copy(second = "fixture:cover-16x9", wave = true)).args("out.mp4")
-        assertTrue(args.value("-filter_complex").contains("overlay=0:(H-h)/2"))
-        assertTrue(args.contains("-shortest"))
-        assertEquals("1:a:0", args.windowed(2).last { it[0] == "-map" }[1])
+        for (duration in listOf(0L, -1L)) {
+            assertThrows(IllegalArgumentException::class.java) {
+                MediaCommands.build(options(JobType.AUDIO_TO_VIDEO).copy(second = "fixture:cover-16x9", durationMs = duration))
+            }
+        }
+        for (wave in listOf(false, true)) {
+            val args = MediaCommands.build(options(JobType.AUDIO_TO_VIDEO).copy(second = "fixture:cover-16x9", wave = wave)).args("out.mp4")
+            if (wave) assertTrue(args.value("-filter_complex").contains("overlay=0:(H-h)/2"))
+            // A looped still image requires a finite output bound independent
+            // of encoder latency and still-image demuxer duration estimates.
+            assertFalse(args.contains("-shortest"))
+            assertEquals("4.000", args.value("-t"))
+            assertTrue(args.indexOf("-t") > args.indexOfLast { it == "-i" })
+            assertEquals("1:a:0", args.windowed(2).last { it[0] == "-map" }[1])
+        }
     }
 
     @Test fun outputArgumentsPreservePathsAndDoNotDependOnDecimalLocale() {

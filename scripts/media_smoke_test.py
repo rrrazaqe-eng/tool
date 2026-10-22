@@ -48,11 +48,33 @@ def make_fixtures(root: Path) -> dict[str, Path]:
     return fixtures
 
 
+def host_arguments(args: list[str]) -> list[str]:
+    """Substitute host encoders and remove only their Android NDK options.
+
+    extract_extradata and all other output/filter settings stay in the command;
+    those must remain valid in the host integration checks too.
+    """
+    converted = []
+    index = 0
+    native_options = {"-ndk_codec:v", "-ndk_async:v"}
+    encoder_names = {"h264_mediacodec": "libx264", "hevc_mediacodec": "libx265"}
+    while index < len(args):
+        arg = args[index]
+        if arg in native_options:
+            if index + 1 >= len(args):
+                raise ValueError(f"Missing value for native encoder option {arg}")
+            index += 2
+            continue
+        converted.append(encoder_names.get(arg, arg))
+        index += 1
+    return converted
+
+
 def run_case(case: dict, root: Path, fixtures: dict[str, Path]) -> dict:
     name = case["name"]
     output = root / f"{name}.{case['extension']}"
     args = [str(output) if arg == "fixture:output" else str(fixtures.get(arg, arg)) for arg in case["args"]]
-    args = ["libx264" if arg == "h264_mediacodec" else "libx265" if arg == "hevc_mediacodec" else arg for arg in args]
+    args = host_arguments(args)
     if "-c:v" in args:
         args[-1:-1] = ["-preset", "ultrafast", "-threads", "2"]
         if "libx265" in args:

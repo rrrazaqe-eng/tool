@@ -93,6 +93,7 @@ class ProcessingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (BuildConfig.DEBUG) android.util.Log.d("ToolsStrong", "Service action=${intent?.action}, running=$isRunning, terminal=${terminal.get()}")
         when (intent?.action) {
             ACTION_CANCEL -> cancelProcessing("Обработка отменена")
             ACTION_START -> if (!isRunning && !terminal.get() && work?.isCompleted != false) runJob(intent)
@@ -139,7 +140,8 @@ class ProcessingService : Service() {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, makeNotification(initial),
                 if (Build.VERSION.SDK_INT >= 35) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
                 else ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            android.util.Log.e("ToolsStrong", "Foreground service start failed", error)
             terminal.set(true)
             isRunning = false
             publish(initial.copy(running = false, message = "Не удалось запустить фоновую обработку"))
@@ -203,6 +205,9 @@ class ProcessingService : Service() {
                         error("Не удалось обработать файл. Проверьте формат и поддержку выбранного кодека устройством")
                     }
                     require(outputFile.length() > 0) { "Обработчик создал пустой файл" }
+                    if (spec.kind == MediaUtils.OutputKind.VIDEO) require(MediaUtils.hasVideo(outputFile)) {
+                        "Кодек не создал видеодорожку. Попробуйте H.264 или другое разрешение"
+                    }
                     val target = spec.targetBytes
                     if (target == null || outputFile.length() <= target) break
                     require(attempt++ < 2) { "Не удалось уложиться в размер. Увеличьте число МБ или уменьшите разрешение" }
@@ -314,6 +319,7 @@ class ProcessingService : Service() {
     }
 
     private fun publish(state: JobUiState) {
+        if (BuildConfig.DEBUG) android.util.Log.d("ToolsStrong", "Job running=${state.running}, progress=${state.progress}, cancelled=${state.cancelled}, result=${state.isResult}")
         JobStore.save(this, state)
         sendBroadcast(Intent(ACTION_STATE).setPackage(packageName))
     }

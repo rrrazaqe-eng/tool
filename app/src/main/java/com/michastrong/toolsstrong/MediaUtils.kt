@@ -116,6 +116,17 @@ object MediaUtils {
         }
     }
 
+    fun hasVideo(file: File): Boolean {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(file.absolutePath)
+            (0 until extractor.trackCount).any { index ->
+                extractor.getTrackFormat(index).getString(android.media.MediaFormat.KEY_MIME)?.startsWith("video/") == true
+            }
+        } catch (_: Exception) { false }
+        finally { extractor.release() }
+    }
+
     fun cleanBaseName(name: String): String {
         val withoutExt = name.substringBeforeLast('.', name)
         return withoutExt.replace(Regex("[^0-9A-Za-zА-Яа-яЁё _.-]"), "_").trim().ifBlank { "file" }.take(90)

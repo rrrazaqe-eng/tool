@@ -179,16 +179,23 @@ class AndroidMediaTest {
                     putExtra(ProcessingService.EXTRA_DURATION, 60_000L)
                 }
                 ProcessingService.start(activity, request)
-                ProcessingService.cancel(activity)
             }
-            waitUntil { JobStore.load(context).cancelled && !ProcessingService.isRunning }
+            val notifications = context.getSystemService(NotificationManager::class.java)
+            waitUntil("processing START and foreground notification") {
+                JobStore.load(context).running && ProcessingService.isRunning &&
+                    notifications.activeNotifications.any { it.id == 4107 }
+            }
+            // The real cancel button becomes available only after the START state is visible.
+            scenario.onActivity { activity -> ProcessingService.cancel(activity) }
+            waitUntil("cancelled processing and finished cleanup") {
+                JobStore.load(context).cancelled && !ProcessingService.isRunning
+            }
             val state = JobStore.load(context)
             assertFalse(state.running)
             assertFalse(state.isResult)
             assertTrue(source.exists())
             assertTrue(HistoryStore.load(context).isEmpty())
-            val notifications = context.getSystemService(NotificationManager::class.java)
-            waitUntil { notifications.activeNotifications.none { it.id == 4107 } }
+            waitUntil("foreground notification removal") { notifications.activeNotifications.none { it.id == 4107 } }
             SystemClock.sleep(200)
             assertTrue("Late completion overwrote cancellation", JobStore.load(context).cancelled)
             assertFalse(JobStore.load(context).isResult)
@@ -280,12 +287,14 @@ class AndroidMediaTest {
             val spec = MediaCommands.build(MediaCommands.Options(JobType.AUDIO_TO_VIDEO,
                 audio.absolutePath, audio.name, 1000, second = cover.absolutePath, width = 320, height = 180, wave = wave))
             val output = temp("mp4")
-            ffmpeg(spec.args(output.absolutePath))
+            val nativeLog = ffmpeg(spec.args(output.absolutePath))
             val extractor = MediaExtractor()
             try {
                 extractor.setDataSource(output.absolutePath)
                 val formats = (0 until extractor.trackCount).map(extractor::getTrackFormat)
                 assertTrue(formats.any { it.getString(MediaFormat.KEY_MIME) == "audio/mp4a-latm" })
+                assertTrue("Expected a video/avc track (wave=$wave); actual tracks: $formats\n$nativeLog",
+                    formats.any { it.getString(MediaFormat.KEY_MIME) == "video/avc" })
                 val video = formats.single { it.getString(MediaFormat.KEY_MIME) == "video/avc" }
                 assertEquals(320, video.getInteger(MediaFormat.KEY_WIDTH))
                 assertEquals(180, video.getInteger(MediaFormat.KEY_HEIGHT))
@@ -335,9 +344,11 @@ class AndroidMediaTest {
         return temp("wav").also { it.writeBytes(buffer.array()) }
     }
 
-    private fun ffmpeg(args: List<String>) {
+    private fun ffmpeg(args: List<String>): String {
         val session = FFmpegKit.executeWithArguments(args.toTypedArray())
-        assertTrue(session.allLogsAsString.takeLast(4000), ReturnCode.isSuccess(session.returnCode))
+        val log = session.allLogsAsString
+        assertTrue(log.takeLast(4000), ReturnCode.isSuccess(session.returnCode))
+        return log
     }
 
     private fun duration(file: File): Long {
@@ -348,10 +359,11 @@ class AndroidMediaTest {
         } finally { retriever.release() }
     }
 
-    private fun waitUntil(condition: () -> Boolean) {
+    private fun waitUntil(description: String, condition: () -> Boolean) {
         val deadline = SystemClock.elapsedRealtime() + 5000
         while (!condition() && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(20)
-        assertTrue("Timed out waiting for Android service state", condition())
+        assertTrue("Timed out waiting for $description; isRunning=${ProcessingService.isRunning}; " +
+            "state=${JobStore.load(context)}", condition())
     }
 
     private fun grantNotifications() {
